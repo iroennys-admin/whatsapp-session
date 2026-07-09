@@ -6,7 +6,7 @@
     "start": "node server.js"
   },
   "dependencies": {
-    "@whiskeysockets/baileys": "^6.7.0",
+    "@whiskeysockets/baileys": "github:gatanina-li/baileys",
     "express": "^4.18.2",
     "pino": "^8.17.0",
     "qrcode": "^1.5.3"
