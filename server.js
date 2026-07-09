@@ -74,7 +74,8 @@ app.get('/api/creds/:id', (req, res) => {
 async function startSocket(id) {
   const authDir = `session-${id}`;
   const { state, saveCreds } = await useMultiFileAuthState(authDir);
-  const { version } = await fetchLatestBaileysVersion();
+  let version;
+  try { ({ version } = await fetchLatestBaileysVersion()); } catch { version = [2, 3000, 1033959288]; }
   const logger = pino({ level: 'silent' });
 
   const sock = makeWASocket({
@@ -102,34 +103,51 @@ async function startSocket(id) {
 async function startPair(id, phone) {
   const authDir = `session-${id}`;
   const { state, saveCreds } = await useMultiFileAuthState(authDir);
-  const { version } = await fetchLatestBaileysVersion();
+  let version;
+  try { ({ version } = await fetchLatestBaileysVersion()); } catch { version = [2, 3000, 1033959288]; }
   const logger = pino({ level: 'silent' });
 
-  const sock = makeWASocket({
-    version,
-    auth: { creds: state.creds, keys: makeCacheableSignalKeyStore(state.keys, logger) },
-    printQRInTerminal: false,
-    logger,
-    syncFullHistory: false,
-    markOnlineOnConnect: false,
+  // ponytail: wrapped in Promise to wait for QR event (socket ready) before calling requestPairingCode
+  return new Promise((resolve, reject) => {
+    const sock = makeWASocket({
+      version,
+      auth: { creds: state.creds, keys: makeCacheableSignalKeyStore(state.keys, logger) },
+      printQRInTerminal: false,
+      logger,
+      syncFullHistory: false,
+      markOnlineOnConnect: false,
+      browser: ['Ubuntu', 'Chrome', '20.0.04'],
+    });
+
+    sessions[id].sock = sock;
+    sessions[id].state = 'pairing';
+    sock.ev.on('creds.update', saveCreds);
+
+    let done = false;
+    const timeout = setTimeout(() => {
+      if (!done) { done = true; reject(new Error('Timeout: socket did not connect')); }
+    }, 20000);
+
+    sock.ev.on('connection.update', async (up) => {
+      if (up.connection === 'open') sessions[id].state = 'connected';
+      if (up.connection === 'close') {
+        const reason = up.lastDisconnect?.error?.output?.statusCode;
+        sessions[id].state = reason === DisconnectReason.loggedOut ? 'loggedOut' : 'closed';
+        if (!done) { done = true; clearTimeout(timeout); reject(new Error('Connection closed before pairing')); }
+      }
+      // QR event = socket is connected to WhatsApp, ready for pairing
+      if (up.qr && !done) {
+        done = true;
+        clearTimeout(timeout);
+        try {
+          const code = await sock.requestPairingCode(phone);
+          resolve(code.match(/.{1,4}/g)?.join('-') || code);
+        } catch (e) {
+          reject(e);
+        }
+      }
+    });
   });
-
-  sessions[id].sock = sock;
-  sock.ev.on('creds.update', saveCreds);
-
-  sock.ev.on('connection.update', (up) => {
-    if (up.connection === 'open') sessions[id].state = 'connected';
-    if (up.connection === 'close') {
-      const reason = up.lastDisconnect?.error?.output?.statusCode;
-      sessions[id].state = reason === DisconnectReason.loggedOut ? 'loggedOut' : 'closed';
-    }
-  });
-
-  // Wait briefly for socket to register, then request pairing code
-  await new Promise(r => setTimeout(r, 1500));
-  // ponytail: 1.5s delay is a heuristic, works in practice. If baileys version changes, may need to wait for `sock.authState.creds.registered` check instead.
-  const code = await sock.requestPairingCode(phone);
-  return code.match(/.{1,4}/g)?.join('-') || code;
 }
 
 createServer(app).listen(PORT, () => console.log(`→ http://localhost:${PORT}`));
