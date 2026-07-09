@@ -40,6 +40,8 @@ app.get('/api/stream/:id', (req, res) => {
     if (s.qr && s.qr !== lastQr) { lastQr = s.qr; send({ type: 'qr', qr: s.qr }); }
     if (s.state === 'connected') { send({ type: 'connected' }); cleanup(); }
     if (s.state === 'error') { send({ type: 'error', error: s.error }); cleanup(); }
+    if (s.state === 'closed') { send({ type: 'error', error: 'Connection closed unexpectedly' }); cleanup(); }
+    if (s.state === 'loggedOut') { send({ type: 'error', error: 'Session logged out' }); cleanup(); }
   }, 500);
   const cleanup = () => { clearInterval(iv); res.end(); };
   req.on('close', cleanup);
