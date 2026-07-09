@@ -103,8 +103,7 @@ async function startSocket(id) {
 }
 
 async function startPair(id, phone) {
-  const authDir = `session-${id}`;
-  const { state, saveCreds } = await useMultiFileAuthState(authDir);
+  const { state, saveCreds } = await useMultiFileAuthState(`session-${id}`);
   let version;
   try { ({ version } = await fetchLatestBaileysVersion()); } catch { version = [2, 3000, 1033959288]; }
   const logger = pino({ level: 'silent' });
@@ -116,7 +115,6 @@ async function startPair(id, phone) {
     logger,
     syncFullHistory: false,
     markOnlineOnConnect: false,
-    browser: ['Ubuntu', 'Chrome', '20.0.04'],
   });
 
   sessions[id].sock = sock;
@@ -126,14 +124,12 @@ async function startPair(id, phone) {
   sock.ev.on('connection.update', (up) => {
     if (up.connection === 'open') sessions[id].state = 'connected';
     if (up.connection === 'close') {
-      const reason = up.lastDisconnect?.error?.output?.statusCode;
-      sessions[id].state = reason === DisconnectReason.loggedOut ? 'loggedOut' : 'closed';
+      sessions[id].state = up.lastDisconnect?.error?.output?.statusCode === DisconnectReason.loggedOut ? 'loggedOut' : 'closed';
     }
   });
 
-  // Esperar que el socket inicialice (3s igual que GataBot)
-  await new Promise(r => setTimeout(r, 3000));
-
+  // Según docs oficiales: requestPairingCode se llama inmediatamente,
+  // el socket maneja la conexión y el pairing internamente
   const code = await sock.requestPairingCode(phone);
   return code.match(/.{1,4}/g)?.join('-') || code;
 }
