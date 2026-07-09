@@ -108,6 +108,8 @@ async function startPair(id, phone) {
   try { ({ version } = await fetchLatestBaileysVersion()); } catch { version = [2, 3000, 1033959288]; }
   const logger = pino({ level: 'silent' });
 
+  // ponytail: mismo defaultQueryTimeoutMs:undefined que GataBot para evitar
+  // que el pairing request expire antes de que el websocket termine de conectar
   const sock = makeWASocket({
     version,
     auth: { creds: state.creds, keys: makeCacheableSignalKeyStore(state.keys, logger) },
@@ -115,12 +117,14 @@ async function startPair(id, phone) {
     logger,
     syncFullHistory: false,
     markOnlineOnConnect: false,
+    defaultQueryTimeoutMs: undefined,
+    keepAliveIntervalMs: 55000,
+    maxIdleTimeMs: 60000,
   });
 
   sessions[id].sock = sock;
   sessions[id].state = 'pairing';
   sock.ev.on('creds.update', saveCreds);
-
   sock.ev.on('connection.update', (up) => {
     if (up.connection === 'open') sessions[id].state = 'connected';
     if (up.connection === 'close') {
@@ -128,8 +132,9 @@ async function startPair(id, phone) {
     }
   });
 
-  // Según docs oficiales: requestPairingCode se llama inmediatamente,
-  // el socket maneja la conexión y el pairing internamente
+  // Pequeña pausa para que el websocket termine de establecer
+  await new Promise(r => setTimeout(r, 500));
+
   const code = await sock.requestPairingCode(phone);
   return code.match(/.{1,4}/g)?.join('-') || code;
 }
